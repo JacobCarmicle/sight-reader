@@ -1,0 +1,15 @@
+services:
+  sight-reader:
+    build: .
+    image: sight-reader:latest
+    container_name: sight-reader
+    ports:
+      # Must be reached as http://localhost:<port> — browsers only grant
+      # microphone access on a secure context, and localhost counts as one.
+      # A LAN address or container IP will not.
+      - "8080:80"
+    restart: unless-stopped
+
+    # To edit index.html and just refresh, instead of rebuilding, uncomment:
+    # volumes:
+    #   - ./index.html:/usr/share/nginx/html/index.html:ro

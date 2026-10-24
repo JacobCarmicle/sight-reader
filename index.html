@@ -1,0 +1,975 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sight Reader</title>
+<!-- Music notation. NB: this cdnjs path is labelled 4.2.5 but serves VexFlow 3.0.9. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vexflow/4.2.5/vexflow-min.js"></script>
+<style>
+  :root{
+    --bg:#f5f3ef; --card:#fff;
+    --ink:#17160f; --ink2:#5d574f; --ink3:#918a80;
+    --line:#e5e0d7; --line2:#f1ede6;
+    --accent:#2c6e4a; --accent-d:#255c3d; --accent-s:#eaf2ed; --accent-b:#d3e4d9;
+    --bad:#b02a46; --bad-s:#fceef0; --bad-b:#f1c6cd;
+    --r:12px;
+    --sh:0 1px 2px rgba(20,18,12,.04), 0 6px 20px rgba(20,18,12,.05);
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none!important}
+  body{margin:0;color:var(--ink);-webkit-font-smoothing:antialiased;min-height:100vh;
+    background:linear-gradient(180deg,#f8f6f2 0%,#f1ede6 100%) fixed;
+    font:15px/1.5 ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif}
+  /* soft wash so the page isn't a flat sheet */
+  body::before{content:'';position:fixed;left:0;right:0;top:0;height:340px;pointer-events:none;
+    background:radial-gradient(120% 100% at 50% 0,rgba(58,81,189,.075),transparent 70%)}
+  .wrap{position:relative}
+  .wrap{max-width:1100px;margin:0 auto;padding:26px 24px 72px}
+
+  header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px}
+  .brand{display:flex;align-items:center;gap:11px;min-width:0}
+  .mark{flex:none;width:27px;height:27px;border-radius:8px;display:grid;place-items:center;
+    color:#fff;font-size:15px;line-height:1;padding-bottom:2px;
+    background:linear-gradient(140deg,#4a62d8,#1f7f7a);
+    box-shadow:0 2px 7px rgba(58,81,189,.32),inset 0 1px 0 rgba(255,255,255,.4)}
+  h1{margin:0;font-size:19px;font-weight:650;letter-spacing:-.015em}
+  .tagline{font-size:13px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  .layout{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:20px;align-items:start}
+  @media(max-width:900px){.layout{grid-template-columns:minmax(0,1fr)}.side{position:static!important}}
+
+  /* ---- stage ---- */
+  .stage{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+    box-shadow:var(--sh);overflow:hidden}
+  .posbar{--pos:#2c6e4a;--pos-bg:#eaf2ed;--pos-bg2:#c3e2d1;--pos-bd:#d3e4d9;
+    display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;padding:13px 20px;
+    background:var(--pos-bg);border-bottom:1px solid var(--pos-bd);transition:background .35s}
+  .posbar.changed{animation:posflash 1s ease-out}
+  @keyframes posflash{from{background:var(--pos-bg2)}to{background:var(--pos-bg)}}
+  #posName{font:700 19px/1.2 ui-sans-serif,system-ui;color:var(--pos);letter-spacing:-.018em}
+  #posSpan{font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ink2)}
+  .staff{padding:22px 24px 10px}
+  #score{width:100%}
+  #score svg{width:100%;height:auto;display:block}
+
+  /* ---- live feedback ---- */
+  .feedback{display:flex;align-items:center;gap:24px;flex-wrap:wrap;
+    padding:13px 20px;border-top:1px solid var(--line2);background:#fcfbf9}
+  .heard{display:flex;align-items:baseline;gap:9px;min-width:132px}
+  .heard .val{font:650 29px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:-.03em;
+    transition:color .12s}
+  .heard .hz{font:12px/1 ui-monospace,Menlo,monospace;color:var(--ink3)}
+  .heard.idle .val{color:var(--ink3)}
+  .meters{display:flex;gap:22px;flex:1;min-width:180px}
+  .meter{flex:1;min-width:84px}
+  .meter .cap{display:flex;justify-content:space-between;gap:8px;margin-bottom:6px;
+    font:11px/1 ui-monospace,Menlo,monospace;color:var(--ink3)}
+  .track{position:relative;height:7px;border-radius:99px;background:#e9e5dd;overflow:hidden}
+  .track .fill{position:absolute;inset:0 auto 0 0;width:0;border-radius:99px;
+    background:var(--ink3);transition:width .06s linear,background .15s}
+  #clarityBar{background:linear-gradient(90deg,#6f7fd6,#3a51bd)}
+  #levelBar.hot{background:linear-gradient(90deg,#4aa273,#2f7d52)}
+  /* Must stay legible over both the empty track and the green fill. */
+  .gatemark{position:absolute;top:0;bottom:0;width:2px;background:rgba(255,255,255,.9);
+    box-shadow:0 0 0 1px rgba(40,35,25,.35)}
+
+  /* ---- actions ---- */
+  .actions{display:flex;align-items:center;gap:9px;margin-top:16px;flex-wrap:wrap}
+  button{font:inherit;font-size:14px;font-weight:600;color:var(--ink);background:var(--card);
+    border:1px solid var(--line);border-radius:9px;padding:10px 15px;cursor:pointer;
+    display:inline-flex;align-items:center;gap:8px;
+    transition:background .13s,border-color .13s,color .13s}
+  button:hover{background:#faf8f4;border-color:#d9d3c8}
+  button:active{transform:translateY(1px)}
+  button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.primary:hover{background:var(--accent-d);border-color:var(--accent-d)}
+  button.live{background:var(--bad-s);border-color:var(--bad-b);color:var(--bad)}
+  button.live:hover{background:#f9e0e4;border-color:#e7a8b3}
+  .dot{display:none;width:8px;height:8px;border-radius:50%;background:var(--bad)}
+  button.live .dot{display:block;animation:pulse 1.5s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.2}}
+  .pill{margin-left:auto;font:600 12.5px/1 ui-monospace,Menlo,monospace;padding:8px 12px;
+    border-radius:999px;background:var(--line2);border:1px solid var(--line);color:var(--ink2)}
+  .pill.ok{background:var(--accent-s);border-color:var(--accent-b);color:var(--accent)}
+  .pill.err{background:var(--bad-s);border-color:var(--bad-b);color:var(--bad)}
+
+  /* ---- stats ---- */
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;margin-top:18px;
+    background:var(--line);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+  @media(max-width:560px){.stats{grid-template-columns:repeat(2,1fr)}}
+  .stat{background:var(--card);padding:13px 16px}
+  .stat{position:relative}
+  .stat::before{content:'';position:absolute;inset:0 0 auto 0;height:2px;background:var(--tint)}
+  .stat:nth-child(1){--tint:#2f7d52} .stat:nth-child(2){--tint:#3a51bd}
+  .stat:nth-child(3){--tint:#b4622a} .stat:nth-child(4){--tint:#1f7f7a}
+  .stat b{display:block;font:650 22px/1.2 ui-sans-serif,system-ui;letter-spacing:-.02em;color:var(--tint)}
+  .stat span{font-size:10.5px;font-weight:600;color:var(--ink3);text-transform:uppercase;letter-spacing:.08em}
+
+  .fineprint{margin:14px 2px 0;font-size:12.5px;color:var(--ink3)}
+  kbd{font:600 11px ui-monospace,Menlo,monospace;background:var(--line2);border:1px solid var(--line);
+    border-bottom-width:2px;border-radius:4px;padding:2px 5px;color:var(--ink2)}
+
+  /* ---- sidebar ---- */
+  .side{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+    box-shadow:var(--sh);position:sticky;top:24px;overflow:hidden}
+  .sect{padding:15px 16px}
+  .sect + .sect{border-top:1px solid var(--line2)}
+  .sect h2,.sect summary{margin:0;font:700 10.5px/1 ui-sans-serif,system-ui;text-transform:uppercase;
+    letter-spacing:.09em;color:var(--ink3)}
+  .sect h2{margin-bottom:12px}
+  summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between}
+  summary::-webkit-details-marker{display:none}
+  summary::after{content:'+';font:400 14px/1 ui-monospace,Menlo,monospace;color:var(--ink3)}
+  details[open] summary::after{content:'\2013'}
+  details[open] summary{margin-bottom:12px}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:30px}
+  .row + .row,#posOpts,#randOpts{margin-top:6px}
+  label{font-size:13px;color:var(--ink2);white-space:nowrap}
+  select{font:inherit;font-size:12.5px;color:var(--ink);background:var(--card);
+    flex:1 1 auto;min-width:0;max-width:172px;
+    border:1px solid var(--line);border-radius:7px;padding:6px 8px;cursor:pointer}
+  select:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+  input[type=checkbox]{width:16px;height:16px;margin:0;accent-color:var(--accent);cursor:pointer}
+  input[type=range]{width:100%;margin:0;accent-color:var(--accent);cursor:pointer}
+  .block{margin-top:14px}
+  .blocktop{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px}
+  .linkbtn{background:none;border:0;padding:0;min-height:0;cursor:pointer;
+    font:600 11.5px/1 ui-sans-serif,system-ui;color:var(--accent)}
+  .linkbtn:hover{background:none;text-decoration:underline}
+  .linkbtn[disabled]{color:var(--ink3);cursor:default;text-decoration:none}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{--c:#2c6e4a;--c-bg:#eaf2ed;--c-bd:#d3e4d9;
+    font:600 12px/1 ui-sans-serif,system-ui;padding:6px 11px;min-height:0;border-radius:999px;
+    color:var(--ink3);background:var(--card);border:1px solid var(--line)}
+  .chip:hover{background:#faf8f4;border-color:#d9d3c8}
+  .chip[aria-pressed="true"]{color:var(--c);background:var(--c-bg);border-color:var(--c-bd)}
+  .chip[aria-pressed="true"]:hover{background:var(--c-bg);border-color:var(--c)}
+  .slider{margin-top:12px}
+  .slider:first-of-type{margin-top:0}
+  .slider .cap{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px}
+  .mono{font:11.5px/1 ui-monospace,Menlo,monospace;color:var(--ink3)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <span class="mark" aria-hidden="true">&#9834;</span>
+      <h1>Sight Reader</h1>
+      <span class="tagline">Play the highlighted note</span>
+    </div>
+    <button id="micBtn" class="primary"><span class="dot"></span><span id="micLabel">Enable microphone</span></button>
+  </header>
+
+  <div class="layout">
+    <main>
+      <section class="stage">
+        <div class="posbar" id="posBar" hidden><span id="posName"></span><span id="posSpan"></span></div>
+        <div class="staff"><div id="score"></div></div>
+        <div class="feedback">
+          <div class="heard idle" id="heard">
+            <span class="val" id="heardNote">&mdash;</span>
+            <span class="hz" id="heardHz"></span>
+          </div>
+          <div class="meters">
+            <div class="meter">
+              <div class="cap"><span>Clarity</span><span id="clarityVal">0%</span></div>
+              <div class="track"><i class="fill" id="clarityBar"></i></div>
+            </div>
+            <div class="meter">
+              <div class="cap"><span>Level</span><span id="levelVal">&minus;&infin; dB</span></div>
+              <div class="track"><i class="fill" id="levelBar"></i><i class="gatemark" id="gateMark"></i></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="actions">
+        <button id="skipBtn">Skip</button>
+        <button id="resetBtn">Reset</button>
+        <span class="pill" id="status">Mic off</span>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><b id="sCorrect">0</b><span>Correct</span></div>
+        <div class="stat"><b id="sAcc">&mdash;</b><span>Accuracy</span></div>
+        <div class="stat"><b id="sStreak">0</b><span>Streak</span></div>
+        <div class="stat"><b id="sAvg">&mdash;</b><span>Avg time</span></div>
+      </div>
+
+      <p class="fineprint"><kbd>Space</kbd> skip &nbsp;<kbd>R</kbd> reset &nbsp;&mdash; use headphones, or keep the
+      mic away from your speakers, and let each note ring cleanly.</p>
+    </main>
+
+    <aside class="side">
+      <div class="sect">
+        <h2>Drill</h2>
+        <div class="row"><label for="mode">Mode</label>
+          <select id="mode">
+            <option value="random" selected>Random notes</option>
+            <option value="position">Five-finger positions</option>
+          </select></div>
+        <div class="row"><label for="clef">Clef</label>
+          <select id="clef">
+            <option value="treble" selected>Treble</option>
+            <option value="bass">Bass</option>
+            <option value="grand">Grand staff</option>
+          </select></div>
+
+        <div id="randOpts">
+          <div class="row"><label for="range">Range</label>
+            <select id="range">
+              <option value="easy" selected>On the staff</option>
+              <option value="medium">+ ledger lines</option>
+              <option value="hard">Wide</option>
+            </select></div>
+          <div class="row"><label for="accidentals">Black keys</label>
+            <input type="checkbox" id="accidentals"></div>
+        </div>
+
+        <div id="posOpts" hidden>
+          <div class="row"><label for="posSet">Position set</label>
+            <select id="posSet">
+              <option value="penta" selected>Any root (C&ndash;B)</option>
+              <option value="method">Method book</option>
+            </select></div>
+          <div class="row"><label for="posEvery">Change every</label>
+            <select id="posEvery">
+              <option value="4">4 notes</option>
+              <option value="8" selected>8 notes</option>
+              <option value="16">16 notes</option>
+              <option value="0">Never</option>
+            </select></div>
+
+          <div class="block">
+            <div class="blocktop">
+              <label id="posPickLabel">In rotation</label>
+              <button type="button" class="linkbtn" id="posAll">Select all</button>
+            </div>
+            <div class="chips" id="posPick" role="group" aria-labelledby="posPickLabel"></div>
+            <p class="fineprint" id="posHint" style="margin-top:8px"></p>
+          </div>
+        </div>
+      </div>
+
+      <div class="sect">
+        <h2>Display</h2>
+        <div class="row"><label for="showNames">Note names</label>
+          <input type="checkbox" id="showNames"></div>
+        <div class="row" id="fingerRow" hidden><label for="showFingers">Finger numbers</label>
+          <input type="checkbox" id="showFingers"></div>
+      </div>
+
+      <details class="sect">
+        <summary>Detection</summary>
+        <div class="slider">
+          <div class="cap"><label for="gate">Noise gate</label><span class="mono" id="gateVal">&minus;45 dB</span></div>
+          <input type="range" id="gate" min="-70" max="-20" value="-45" step="1">
+        </div>
+        <div class="slider">
+          <div class="cap"><label for="minClarity">Min clarity</label><span class="mono" id="minClarityVal">88%</span></div>
+          <input type="range" id="minClarity" min="70" max="99" value="88" step="1">
+        </div>
+        <div class="row" style="margin-top:14px"><label for="ignoreOctave">Ignore octave errors</label>
+          <input type="checkbox" id="ignoreOctave"></div>
+        <p class="fineprint" style="margin-top:8px">Turn this on if low notes read an octave high &mdash;
+        piano fundamentals are weak down there.</p>
+      </details>
+    </aside>
+  </div>
+</div>
+
+<script>
+/* ------------------------------------------------------------------ *
+ * Pitch detection — McLeod Pitch Method (normalised square difference)
+ * Chosen over plain autocorrelation because its "first key maximum
+ * above threshold" rule is what suppresses octave errors, which are
+ * the dominant failure mode for piano over a microphone.
+ * ------------------------------------------------------------------ */
+const MIN_HZ = 55, MAX_HZ = 1400, PEAK_K = 0.9;
+
+function detectPitch(buf, sr) {
+  const SIZE = buf.length;
+  let sum = 0;
+  for (let i = 0; i < SIZE; i++) sum += buf[i] * buf[i];
+  const rms = Math.sqrt(sum / SIZE);
+
+  const maxLag = Math.min(Math.floor(sr / MIN_HZ), SIZE - 256);
+  const minLag = Math.max(2, Math.floor(sr / MAX_HZ));
+  const nsdf = new Float32Array(maxLag + 1);
+
+  for (let lag = 0; lag <= maxLag; lag++) {
+    let acf = 0, div = 0;
+    for (let i = 0, n = SIZE - lag; i < n; i++) {
+      const a = buf[i], b = buf[i + lag];
+      acf += a * b;
+      div += a * a + b * b;
+    }
+    nsdf[lag] = div > 0 ? (2 * acf) / div : 0;
+  }
+
+  // Skip the guaranteed peak at lag 0: walk to the first negative crossing.
+  let start = 1;
+  while (start <= maxLag && nsdf[start] > 0) start++;
+
+  // Collect one key maximum per positive lobe.
+  const maxima = [];
+  let i = start;
+  while (i < maxLag) {
+    if (nsdf[i] > 0 && nsdf[i - 1] <= 0) {
+      let peak = i, j = i;
+      while (j < maxLag && nsdf[j] > 0) { if (nsdf[j] > nsdf[peak]) peak = j; j++; }
+      if (peak >= minLag) maxima.push(peak);
+      i = j;
+    } else i++;
+  }
+  if (!maxima.length) return { rms, freq: null, clarity: 0 };
+
+  let best = 0;
+  for (const m of maxima) if (nsdf[m] > best) best = nsdf[m];
+  const thresh = best * PEAK_K;
+  let chosen = -1;
+  for (const m of maxima) if (nsdf[m] >= thresh) { chosen = m; break; }
+  if (chosen < 1 || chosen >= maxLag) return { rms, freq: null, clarity: 0 };
+
+  // Parabolic interpolation for sub-sample lag precision.
+  const y0 = nsdf[chosen - 1], y1 = nsdf[chosen], y2 = nsdf[chosen + 1];
+  const a = (y0 + y2 - 2 * y1) / 2, b = (y2 - y0) / 2;
+  const shift = a !== 0 ? -b / (2 * a) : 0;
+  const lag = chosen + Math.max(-1, Math.min(1, shift));
+
+  return { rms, freq: sr / lag, clarity: Math.max(0, Math.min(1, y1)) };
+}
+
+/* ------------------------------------------------------------------ *
+ * Notes
+ * ------------------------------------------------------------------ */
+const SHARP = ['c','c#','d','d#','e','f','f#','g','g#','a','a#','b'];
+const PRETTY = ['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
+const freqToMidi = f => 69 + 12 * Math.log2(f / 440);
+const midiToKey  = m => SHARP[m % 12] + '/' + (Math.floor(m / 12) - 1);
+const midiToName = m => PRETTY[m % 12] + (Math.floor(m / 12) - 1);
+
+const RANGES = {
+  treble: { easy:[64,77], medium:[60,81], hard:[55,88] },
+  bass:   { easy:[43,57], medium:[40,60], hard:[36,64] },
+};
+
+/* ------------------------------------------------------------------ *
+ * Five-finger positions
+ * ------------------------------------------------------------------ */
+const LETTERS = ['c','d','e','f','g','a','b'];
+const LETTER_SEMIS = [0, 2, 4, 5, 7, 9, 11];
+const PENTA = [0, 2, 4, 5, 7];          // major five-finger pattern
+
+// Spell by letter, not by pitch class, so each position reads the way it is
+// written: F position must show B flat, D position F sharp — never enharmonics.
+function spell(midi, letterIdx) {
+  const oct = Math.floor(midi / 12) - 1;
+  const natural = LETTER_SEMIS[letterIdx] + 12 * (oct + 1);
+  const delta = midi - natural;
+  if (Math.abs(delta) > 1) {            // shouldn't happen on white-key roots
+    return { midi, key: midiToKey(midi), acc: SHARP[midi % 12].length > 1 ? '#' : null };
+  }
+  const acc = delta === 1 ? '#' : delta === -1 ? 'b' : null;
+  return { midi, key: LETTERS[letterIdx] + (acc || '') + '/' + oct, acc };
+}
+
+function pentascale(rootMidi) {
+  const rootLetter = LETTERS.indexOf(SHARP[rootMidi % 12][0]);
+  return PENTA.map((iv, i) => spell(rootMidi + iv, (rootLetter + i) % 7));
+}
+
+// Octave for each root, picked so the five-note span sits naturally on its own
+// staff. This reproduces the method-book placements: LH C3, G2 and F2.
+const RH_ROOT = { c:60, d:62, e:64, f:65, g:67, a:69, b:71 };
+const LH_ROOT = { c:48, d:50, e:52, f:41, g:43, a:45, b:47 };
+
+function pentaPosition(letter) {
+  return { name: letter.toUpperCase() + ' position',
+           rh: pentascale(RH_ROOT[letter]), lh: pentascale(LH_ROOT[letter]) };
+}
+const naturals = ms => ms.map(m => spell(m, LETTERS.indexOf(SHARP[m % 12][0])));
+
+const POSITION_SETS = {
+  penta: ['c','d','e','f','g','a','b'].map(pentaPosition),
+  method: [
+    // Both thumbs share middle C, so the left hand reads downward from it and
+    // is plain C major — not the F pentascale — hence the explicit notes.
+    { name: 'Middle C position', rh: naturals([60,62,64,65,67]), lh: naturals([53,55,57,59,60]) },
+    pentaPosition('c'), pentaPosition('g'), pentaPosition('f'),
+  ],
+};
+
+// Right hand numbers upward from the thumb, left hand downward from it, so the
+// lowest note is finger 1 on the right and finger 5 on the left.
+const fingerFor = (hand, idx) => hand === 'r' ? idx + 1 : 5 - idx;
+
+const keyName = k => { const [pc, o] = k.split('/');
+  return pc[0].toUpperCase() + (pc[1] === '#' ? '\u266f' : pc[1] === 'b' ? '\u266d' : '') + o; };
+
+let currentPosName = null, notesInPosition = 0;
+const positionSet = () => POSITION_SETS[$posSet.value];
+
+// Which positions are in the rotation, per set. Kept by name rather than index
+// so it survives filtering, and persisted — "I haven't learned that one yet" is
+// a durable preference, not a per-session one.
+const POS_STORE = 'sightreader.enabledPositions';
+const POS_ENABLED = {
+  penta:  new Set(POSITION_SETS.penta.map(p => p.name)),
+  method: new Set(POSITION_SETS.method.map(p => p.name)),
+};
+try {
+  const saved = JSON.parse(localStorage.getItem(POS_STORE) || 'null');
+  if (saved) for (const k of Object.keys(POS_ENABLED)) {
+    const valid = (saved[k] || []).filter(n => POSITION_SETS[k].some(p => p.name === n));
+    if (valid.length) POS_ENABLED[k] = new Set(valid);
+  }
+} catch (e) { /* storage blocked or corrupt: the defaults stand */ }
+
+function savePositions() {
+  try {
+    localStorage.setItem(POS_STORE, JSON.stringify(Object.fromEntries(
+      Object.entries(POS_ENABLED).map(([k, v]) => [k, [...v]]))));
+  } catch (e) {}
+}
+
+function enabledPositions() {
+  const on = POS_ENABLED[$posSet.value];
+  const list = positionSet().filter(p => on.has(p.name));
+  return list.length ? list : positionSet();   // never leave the drill with nothing
+}
+
+const currentPosition = () => {
+  const list = enabledPositions();
+  return list.find(p => p.name === currentPosName) || list[0];
+};
+
+// Returns a different position when there is one to move to; if the current
+// position is no longer enabled this simply lands on any enabled one.
+function pickNextPosition() {
+  const list = enabledPositions();
+  if (list.length < 2) return list[0].name;
+  let p; do { p = list[(Math.random() * list.length) | 0]; } while (p.name === currentPosName);
+  return p.name;
+}
+
+const posLabel = n => n === 'Middle C position' ? 'Mid C' : n.split(' ')[0];
+
+function notePool() {
+  const clef = $clef.value, r = $range.value;
+  let lo, hi;
+  if (clef === 'grand') {
+    lo = RANGES.bass[r][0]; hi = RANGES.treble[r][1];
+  } else {
+    [lo, hi] = RANGES[clef][r];
+  }
+  const pool = [];
+  for (let m = lo; m <= hi; m++) {
+    const isBlack = SHARP[m % 12].length > 1;
+    if (isBlack && !$accidentals.checked) continue;
+    pool.push(m);
+  }
+  return pool;
+}
+
+/* ------------------------------------------------------------------ *
+ * Rendering
+ * ------------------------------------------------------------------ */
+const VF = Vex.Flow;
+const AHEAD = 4;                 // notes visible at once
+const GHOST = '#a1203f';         // played-wrong note: deep crimson, separated from the bronze LH
+                                 // in lightness as well as hue, so it survives greyscale
+const HIT   = '#0d7f49';         // brief pulse on a correct note
+
+// Notes take their colour from the staff they sit on, which in position mode is
+// the hand that plays them. Indigo/bronze rather than the obvious red/green so
+// the pairing survives the common forms of colour blindness.
+const HAND = {
+  treble: { solid: '#3a51bd', faded: 'rgba(58,81,189,.26)' },
+  bass:   { solid: '#9c6212', faded: 'rgba(156,98,18,.28)' },
+};
+
+// One hue per position, keyed on the first word so "C position" matches across
+// both position sets.
+const POS_COLOR = { C:'#2f7d52', D:'#2f6fa8', E:'#7a4fa8', F:'#a1541f',
+                    G:'#1b6f6a', A:'#a8434f', B:'#7a6a1e', Middle:'#4a6b8a' };
+
+// Blend a hex toward white; avoids depending on CSS color-mix().
+function tint(hex, pct) {
+  const n = parseInt(hex.slice(1), 16), f = pct / 100;
+  const ch = i => Math.round(((n >> i) & 255) * f + 255 * (1 - f));
+  return `rgb(${ch(16)},${ch(8)},${ch(0)})`;
+}
+let queue = [];
+let flash = null;                // 'good' pulse on a hit
+let wrongNote = null;            // ghosted on the staff until the target is found
+
+// Queue entries carry their own spelling and hand so that render() never has to
+// re-derive them: { midi, key, acc, hand, finger }.
+function refillQueue() {
+  while (queue.length < AHEAD) queue.push(nextItem());
+}
+
+function nextItem() {
+  const last = queue[queue.length - 1];
+  if ($mode.value === 'position') {
+    const pos = currentPosition(), clef = $clef.value;
+    const hand = clef === 'treble' ? 'r' : clef === 'bass' ? 'l'
+               : (Math.random() < 0.5 ? 'r' : 'l');
+    const notes = hand === 'r' ? pos.rh : pos.lh;
+    let i, guard = 0;
+    do { i = (Math.random() * notes.length) | 0; }
+    while (last && last.midi === notes[i].midi && ++guard < 20);
+    const n = notes[i];
+    return { midi: n.midi, key: n.key, acc: n.acc, hand, finger: fingerFor(hand, i) };
+  }
+  const pool = notePool();
+  let m, guard = 0;
+  do { m = pool[(Math.random() * pool.length) | 0]; }
+  while (last && m === last.midi && ++guard < 20);
+  return { midi: m, key: midiToKey(m), acc: SHARP[m % 12].length > 1 ? '#' : null,
+           hand: null, finger: null };
+}
+
+// VexFlow flipped this signature between majors: 3.x is addModifier(index, modifier),
+// 4.x is addModifier(modifier, index). cdnjs serves 3.0.9 under its "4.2.5" path, so
+// accept either rather than depending on which one the CDN actually hands us.
+function addAccidental(note, type) {
+  const acc = new VF.Accidental(type);
+  try { note.addModifier(acc, 0); } catch (e) { note.addModifier(0, acc); }
+}
+
+function staveClef(m) {
+  if ($clef.value === 'grand') return m >= 60 ? 'treble' : 'bass';
+  return $clef.value;
+}
+
+// In position mode the hand decides the staff, not the pitch — Middle C position
+// puts a C4 in either hand, and it must appear on that hand's stave.
+function staveClefFor(item) {
+  if ($clef.value !== 'grand') return $clef.value;
+  return item.hand ? (item.hand === 'r' ? 'treble' : 'bass') : staveClef(item.midi);
+}
+
+function render() {
+  const el = document.getElementById('score');
+  el.innerHTML = '';
+  const grand = $clef.value === 'grand';
+  // Logical width doubles as the viewBox, so a smaller W renders the notation
+  // larger once the SVG is stretched to the card.
+  const W = 520;
+  const staveW = W - 26;
+
+  // Stave y is the bounding-box top; VexFlow inserts ~40px of above-staff room
+  // before line 0, so lay the staves out first and derive the height from them.
+  const top = new VF.Stave(13, 28, staveW);   // room above for high ledger lines
+  const bottom = grand ? new VF.Stave(13, 120, staveW) : null;
+  // Annotations sit in rows below the system: fingers first, then note names.
+  const annY = (bottom || top).getYForLine(4) + 44;
+  const showF = $mode.value === 'position' && $showFingers.checked;
+  const nameY = showF ? annY + 15 : annY;
+  const H = (showF && $showNames.checked ? annY + 15 : annY) + 14;
+
+  const renderer = new VF.Renderer(el, VF.Renderer.Backends.SVG);
+  renderer.resize(W, H);
+  const ctx = renderer.getContext();
+
+  top.addClef(grand ? 'treble' : $clef.value).setContext(ctx).draw();
+  if (grand) {
+    bottom.addClef('bass').setContext(ctx).draw();
+    new VF.StaveConnector(top, bottom).setType(VF.StaveConnector.type.BRACE).setContext(ctx).draw();
+    new VF.StaveConnector(top, bottom).setType(VF.StaveConnector.type.SINGLE_LEFT).setContext(ctx).draw();
+  }
+
+  const x0 = top.getNoteStartX() + 14;
+  const step = (top.getX() + staveW - x0 - 26) / AHEAD;
+
+  queue.slice(0, AHEAD).forEach((item, idx) => {
+    const clef = staveClefFor(item);
+    const stave = (grand && clef === 'bass') ? bottom : top;
+    const note = new VF.StaveNote({ keys: [item.key], duration: 'q', clef });
+    if (item.acc) addAccidental(note, item.acc);
+
+    // Ledger lines default to a hardcoded grey hairline, which reads badly on
+    // the coloured target note — and they matter for pitch, so give them the
+    // note's own colour and a little more weight.
+    const hand = HAND[clef === 'bass' ? 'bass' : 'treble'];
+    const color = idx === 0 ? (flash === 'good' ? HIT : hand.solid) : hand.faded;
+    note.setStyle({ fillStyle: color, strokeStyle: color });
+    note.setLedgerLineStyle({ strokeStyle: color, lineWidth: 1.6 });
+
+    const tc = new VF.TickContext();
+    tc.addTickable(note);
+    tc.preFormat();
+    tc.setX(x0 + idx * step);
+    note.setContext(ctx).setStave(stave).draw();
+
+    if (showF && item.finger) {
+      ctx.save();
+      ctx.setFont('ui-sans-serif, system-ui', 12, 'bold');
+      ctx.setFillStyle(color);
+      ctx.fillText(String(item.finger), x0 + idx * step - 2, annY);
+      ctx.restore();
+    }
+    if ($showNames.checked) {
+      ctx.save();
+      ctx.setFont('ui-monospace, Menlo, monospace', 11);
+      ctx.setFillStyle(idx === 0 ? '#6f6a62' : '#c3bdb3');
+      ctx.fillText(keyName(item.key), x0 + idx * step - 7, nameY);
+      ctx.restore();
+    }
+  });
+
+  // The note you actually played, parked beside the target so the distance
+  // between them is readable. Drawn as a stemless whole note in red so it
+  // never reads as part of the music.
+  if (wrongNote !== null) {
+    const gClef = staveClef(wrongNote);
+    const gStave = (grand && gClef === 'bass') ? bottom : top;
+    const gKey = midiToKey(wrongNote);
+    const ghost = new VF.StaveNote({ keys: [gKey], duration: 'w', clef: gClef });
+    if (gKey.includes('#')) addAccidental(ghost, '#');
+    ghost.setStyle({ fillStyle: GHOST, strokeStyle: GHOST });
+    ghost.setLedgerLineStyle({ strokeStyle: GHOST, lineWidth: 1.6 });
+
+    const gtc = new VF.TickContext();
+    gtc.addTickable(ghost);
+    gtc.preFormat();
+    gtc.setX(x0 + 34);
+    ghost.setContext(ctx).setStave(gStave).draw();
+
+    if ($showNames.checked) {
+      ctx.save();
+      ctx.setFont('ui-monospace, Menlo, monospace', 11);
+      ctx.setFillStyle(GHOST);
+      ctx.fillText(midiToName(wrongNote), x0 + 27, nameY);
+      ctx.restore();
+    }
+  }
+
+  const svg = el.querySelector('svg');
+  if (svg) {
+    // VexFlow sets an inline pixel size, which would beat the stylesheet's width:100%.
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.removeAttribute('width'); svg.removeAttribute('height');
+    svg.style.width = '100%'; svg.style.height = 'auto';
+    // A ghost an octave or more off the staff falls outside the planned box.
+    // Widen the viewBox to swallow it rather than clipping it.
+    const b = svg.getBBox();
+    const yTop = Math.min(0, Math.floor(b.y - 4));
+    const yBot = Math.max(H, Math.ceil(b.y + b.height + 4));
+    if (yTop < 0 || yBot > H) svg.setAttribute('viewBox', `0 ${yTop} ${W} ${yBot - yTop}`);
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Game state
+ * ------------------------------------------------------------------ */
+const $ = id => document.getElementById(id);
+const $clef = $('clef'), $range = $('range'), $accidentals = $('accidentals'),
+      $showNames = $('showNames'), $ignoreOctave = $('ignoreOctave'),
+      $gate = $('gate'), $minClarity = $('minClarity'), $status = $('status'),
+      $mode = $('mode'), $posSet = $('posSet'), $posEvery = $('posEvery'),
+      $showFingers = $('showFingers'), $randOpts = $('randOpts'), $posOpts = $('posOpts'),
+      $posBar = $('posBar'), $posName = $('posName'), $posSpan = $('posSpan'),
+      $fingerRow = $('fingerRow'), $heard = $('heard'), $gateMark = $('gateMark'),
+      $micLabel = $('micLabel'), $micBtn = $('micBtn'), $levelBar = $('levelBar'),
+      $posPick = $('posPick'), $posAll = $('posAll'), $posHint = $('posHint');
+
+// One chip per position in the current set, tinted with that position's own hue.
+function buildPosPicker() {
+  const key = $posSet.value;
+  $posPick.innerHTML = '';
+  for (const pos of POSITION_SETS[key]) {
+    const c = POS_COLOR[pos.name.split(' ')[0]] || '#2c6e4a';
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip';
+    b.textContent = posLabel(pos.name);
+    b.title = pos.name;
+    b.style.setProperty('--c', c);
+    b.style.setProperty('--c-bg', tint(c, 12));
+    b.style.setProperty('--c-bd', tint(c, 34));
+    b.onclick = () => togglePosition(pos.name, b);
+    $posPick.appendChild(b);
+  }
+  syncPosPicker();
+}
+
+function syncPosPicker() {
+  const key = $posSet.value, on = POS_ENABLED[key], total = POSITION_SETS[key].length;
+  [...$posPick.children].forEach((b, i) =>
+    b.setAttribute('aria-pressed', String(on.has(POSITION_SETS[key][i].name))));
+  const n = on.size;
+  $posHint.textContent = n === total
+    ? `All ${total} positions in rotation.`
+    : `${n} of ${total} in rotation` + (n === 1 ? ' \u2014 it will not change.' : '.');
+  $posAll.disabled = n === total;
+}
+
+function togglePosition(name, btn) {
+  const on = POS_ENABLED[$posSet.value];
+  if (on.has(name)) {
+    if (on.size === 1) return;        // keep at least one position to drill
+    on.delete(name);
+  } else on.add(name);
+  savePositions();
+  syncPosPicker();
+  if (!on.has(currentPosName)) currentPosName = pickNextPosition();
+  resetDrill();
+}
+
+// dBFS -> position along the level meter, shared by the bar and the gate marker.
+const dbToPct = db => Math.max(0, Math.min(100, (db + 70) / 70 * 100));
+const fmtDb = v => String(v).replace('-', '\u2212') + ' dB';
+
+function updatePosBar(changed) {
+  const on = $mode.value === 'position';
+  $posBar.hidden = !on;
+  if (!on) return;
+  const pos = currentPosition();
+  $posName.textContent = pos.name;
+  const c = POS_COLOR[pos.name.split(' ')[0]] || '#2c6e4a';
+  $posBar.style.setProperty('--pos', c);
+  $posBar.style.setProperty('--pos-bg', tint(c, 11));
+  $posBar.style.setProperty('--pos-bg2', tint(c, 34));
+  $posBar.style.setProperty('--pos-bd', tint(c, 28));
+  const span = h => keyName(h[0].key) + '\u2013' + keyName(h[4].key);
+  const parts = [];
+  if ($clef.value !== 'bass') parts.push('RH ' + span(pos.rh));
+  if ($clef.value !== 'treble') parts.push('LH ' + span(pos.lh));
+  $posSpan.textContent = parts.join('  \u00b7  ');
+  if (changed) {                      // restart the flash
+    $posBar.classList.remove('changed'); void $posBar.offsetWidth;
+    $posBar.classList.add('changed');
+  }
+}
+
+function resetDrill() {
+  queue = []; wrongNote = null; notesInPosition = 0;
+  refillQueue(); updatePosBar(false); render();
+  noteShownAt = performance.now();
+}
+
+let stats = { correct: 0, wrong: 0, streak: 0, best: 0, totalMs: 0 };
+let noteShownAt = performance.now();
+
+// Detection stability
+const STABLE_FRAMES = 3;
+let candidate = null, candidateCount = 0;
+let armed = true, lastAccepted = null, silentFrames = 0;
+
+function updateStats() {
+  $('sCorrect').textContent = stats.correct;
+  const attempts = stats.correct + stats.wrong;
+  $('sAcc').textContent = attempts ? Math.round(100 * stats.correct / attempts) + '%' : '—';
+  $('sStreak').textContent = stats.streak;
+  $('sAvg').textContent = stats.correct ? (stats.totalMs / stats.correct / 1000).toFixed(1) + 's' : '—';
+}
+
+function advance(wasCorrect) {
+  if (wasCorrect) {
+    stats.correct++;
+    stats.streak++;
+    stats.best = Math.max(stats.best, stats.streak);
+    stats.totalMs += performance.now() - noteShownAt;
+  }
+  lastAccepted = queue[0].midi;
+  armed = false;
+  wrongNote = null;
+  candidate = null; candidateCount = 0;
+  queue.shift();
+
+  // A position change invalidates the look-ahead, which still holds notes from
+  // the position being left behind.
+  let changed = false;
+  if ($mode.value === 'position') {
+    const every = +$posEvery.value;
+    if (every && ++notesInPosition >= every) {
+      currentPosName = pickNextPosition();
+      notesInPosition = 0;
+      queue = [];
+      changed = true;
+    }
+  }
+  refillQueue();
+  updatePosBar(changed);
+  noteShownAt = performance.now();
+  flash = wasCorrect ? 'good' : null;
+  render();
+  updateStats();
+  if (flash) setTimeout(() => { flash = null; render(); }, 160);
+}
+
+function matches(heard, target) {
+  return $ignoreOctave.checked ? (heard % 12) === (target % 12) : heard === target;
+}
+
+function onStableNote(midi) {
+  const target = queue[0].midi;
+  if (matches(midi, target)) {
+    advance(true);
+  } else {
+    stats.wrong++;
+    stats.streak = 0;
+    updateStats();
+    const d = midi - target, n = Math.abs(d);
+    setStatus(`${midiToName(midi)} — ${n} semitone${n === 1 ? '' : 's'} too ${d > 0 ? 'high' : 'low'}`, 'err');
+    wrongNote = midi;   // stays on the staff until they find the target
+    render();
+    // Require a release before the same wrong note counts again.
+    lastAccepted = midi;
+    armed = false;
+  }
+}
+
+function setStatus(text, cls) {
+  $status.textContent = text;
+  $status.className = 'pill' + (cls ? ' ' + cls : '');
+}
+
+/* ------------------------------------------------------------------ *
+ * Audio
+ * ------------------------------------------------------------------ */
+let audioCtx = null, analyser = null, buf = null, stream = null, running = false;
+
+async function startMic() {
+  try {
+    // AGC / noise suppression / echo cancellation all mangle pitch content.
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+    });
+  } catch (e) {
+    setStatus('Mic blocked: ' + e.name, 'err');
+    return;
+  }
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  await audioCtx.resume();
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 2048;
+  audioCtx.createMediaStreamSource(stream).connect(analyser);
+  buf = new Float32Array(analyser.fftSize);
+  running = true;
+  $micLabel.textContent = 'Stop microphone';
+  $micBtn.classList.remove('primary');
+  $micBtn.classList.add('live');
+  setStatus('Listening…', 'ok');
+  noteShownAt = performance.now();
+  loop();
+}
+
+function stopMic() {
+  running = false;
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  if (audioCtx) audioCtx.close();
+  audioCtx = null; stream = null;
+  $micLabel.textContent = 'Enable microphone';
+  $micBtn.classList.add('primary');
+  $micBtn.classList.remove('live');
+  setStatus('Mic off');
+  $('heardNote').textContent = '\u2014';
+  $('heardHz').textContent = '';
+  $('clarityBar').style.width = '0%';
+  $levelBar.style.width = '0%';
+  $levelBar.classList.remove('hot');
+  $heard.classList.add('idle');
+}
+
+function loop() {
+  if (!running) return;
+  analyser.getFloatTimeDomainData(buf);
+  const { rms, freq, clarity } = detectPitch(buf, audioCtx.sampleRate);
+
+  const db = rms > 0 ? 20 * Math.log10(rms) : -Infinity;
+  const gateDb = +$gate.value;
+  const minClarity = +$minClarity.value / 100;
+
+  const loud = db > gateDb;
+  $('levelVal').textContent = isFinite(db) ? fmtDb(db.toFixed(0)) : '\u2212\u221e dB';
+  $levelBar.style.width = dbToPct(db) + '%';
+  $levelBar.classList.toggle('hot', loud);
+  $('clarityVal').textContent = Math.round(clarity * 100) + '%';
+  $('clarityBar').style.width = (clarity * 100) + '%';
+
+  const voiced = loud && freq && clarity >= minClarity;
+  const midi = voiced ? Math.round(freqToMidi(freq)) : null;
+
+  $heard.classList.toggle('idle', !voiced);
+  if (voiced) {
+    $('heardNote').textContent = midiToName(midi);
+    $('heardHz').textContent = freq.toFixed(1) + ' Hz';
+  } else if (!loud) {
+    $('heardNote').textContent = '\u2014';
+    $('heardHz').textContent = '';
+  }
+
+  // Re-arm on release (silence) or on a clearly different pitch.
+  if (!armed) {
+    if (!loud) { if (++silentFrames >= 2) { armed = true; silentFrames = 0; setStatus('Listening…', 'ok'); } }
+    else { silentFrames = 0; if (midi !== null && midi !== lastAccepted) { armed = true; setStatus('Listening…', 'ok'); } }
+    requestAnimationFrame(loop);
+    return;
+  }
+  silentFrames = 0;
+
+  // Require N consecutive frames on the same note — kills attack transients.
+  if (midi === null) {
+    candidate = null; candidateCount = 0;
+  } else if (midi === candidate) {
+    if (++candidateCount === STABLE_FRAMES) onStableNote(midi);
+  } else {
+    candidate = midi; candidateCount = 1;
+  }
+
+  requestAnimationFrame(loop);
+}
+
+/* ------------------------------------------------------------------ *
+ * Wiring
+ * ------------------------------------------------------------------ */
+$micBtn.onclick = () => running ? stopMic() : startMic();
+$('skipBtn').onclick = () => { stats.streak = 0; advance(false); };
+$('resetBtn').onclick = () => {
+  stats = { correct: 0, wrong: 0, streak: 0, best: 0, totalMs: 0 };
+  resetDrill(); updateStats();
+};
+[$clef, $range, $accidentals, $posEvery].forEach(el => el.onchange = resetDrill);
+$posSet.onchange = () => { buildPosPicker(); currentPosName = pickNextPosition(); resetDrill(); };
+$posAll.onclick = () => {
+  POS_ENABLED[$posSet.value] = new Set(POSITION_SETS[$posSet.value].map(p => p.name));
+  savePositions(); syncPosPicker(); resetDrill();
+};
+$mode.onchange = () => {
+  $randOpts.hidden  = $mode.value !== 'random';
+  $posOpts.hidden   = $mode.value !== 'position';
+  $fingerRow.hidden = $mode.value !== 'position';
+  currentPosName = pickNextPosition();
+  resetDrill();
+};
+$showNames.onchange = render;
+$showFingers.onchange = render;
+$gate.oninput = () => {
+  $('gateVal').textContent = fmtDb($gate.value);
+  $gateMark.style.left = dbToPct(+$gate.value) + '%';
+};
+$minClarity.oninput = () => $('minClarityVal').textContent = $minClarity.value + '%';
+
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (e.code === 'Space') { e.preventDefault(); $('skipBtn').click(); }
+  if (e.key.toLowerCase() === 'r') $('resetBtn').click();
+});
+
+$gate.oninput();
+buildPosPicker();
+currentPosName = pickNextPosition();
+refillQueue();
+updatePosBar(false);
+render();
+updateStats();
+</script>
+</body>
+</html>
